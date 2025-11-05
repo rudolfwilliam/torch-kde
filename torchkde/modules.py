@@ -5,10 +5,10 @@ from torch import nn
 from .utils import ensure_two_dimensional, check_if_mat
 from .algorithms import RootTree, SUPPORTED_ALGORITHMS
 from .bandwidths import SUPPORTED_BANDWIDTHS, compute_bandwidth
-from .kernels import (GaussianKernel, 
-                      EpanechnikovKernel, 
-                      ExponentialKernel, 
-                      TopHatKernel, 
+from .kernels import (GaussianKernel,
+                      EpanechnikovKernel,
+                      ExponentialKernel,
+                      TopHatKernel,
                       VonMisesFisherKernel,
                       SUPPORTED_KERNELS)
 
@@ -28,7 +28,7 @@ KERNEL_DICT = {
 
 
 class KernelDensity(nn.Module):
-    """Analag to the KernelDensity class in sklearn.neighbors 
+    """Analag to the KernelDensity class in sklearn.neighbors
     (see https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/neighbors/_kde.py)."""
 
     def __init__(
@@ -37,7 +37,8 @@ class KernelDensity(nn.Module):
         bandwidth: Union[float, str] = 1.0,
         algorithm: str = "standard",
         kernel: str = "gaussian",
-        kernel_kwargs: dict = None
+        kernel_kwargs: dict = None,
+        eps: float = 0.0,
     ) -> None:
         """Initialize the KernelDensity estimator.
 
@@ -51,7 +52,10 @@ class KernelDensity(nn.Module):
             The kernel to use for density estimation.
         kernel_kwargs : dict, optional
             Additional keyword arguments for the kernel.
+        eps: float, optional
+            Small positive clamp for densities before log to avoid -inf.
         """
+        super().__init__()
         if not isinstance(bandwidth, str):
             assert bandwidth > 0, "Bandwidth must be positive."
             self.bandwidth = bandwidth**2 # square the bandwidth to match sklearn's implementation
@@ -69,10 +73,11 @@ class KernelDensity(nn.Module):
         self.device = None
         self.n_features = None
         self.data = None
+        self.eps = eps
 
         if algorithm not in SUPPORTED_ALGORITHMS:
             raise ValueError(f"Algorithm {algorithm} not supported")
-        
+
         if kernel not in SUPPORTED_KERNELS:
             raise ValueError(f"Kernel {kernel} not supported")
 
@@ -80,8 +85,8 @@ class KernelDensity(nn.Module):
             raise ValueError(f"Bandwidth {bandwidth} not supported")
 
 
-    def fit(self, 
-            X: torch.Tensor, 
+    def fit(self,
+            X: torch.Tensor,
             sample_weight: Optional[torch.Tensor] = None
             ) -> 'KernelDensity':
         """Fit the Kernel Density model on the data.
@@ -141,7 +146,7 @@ class KernelDensity(nn.Module):
         """
         assert self.is_fitted, "Model must be fitted before scoring samples."
         assert X.device == self.device, "Device of the query data must be on the same device as the data for fitting the estimator."
-        
+
         n_samples = X.shape[0]
         # Compute log-density estimation with a kernel function
         log_density = []
@@ -156,7 +161,7 @@ class KernelDensity(nn.Module):
             density = ((self.sample_weight * kernel_values).sum(-1) * self.kernel_module.norm_constant) \
                         / self.sample_weight.sum()
             # Compute the log-density
-            log_density.append(density.log())
+            log_density.append(density.clamp(min=self.eps).log())
 
         # Convert the list of log-density values into a tensor
         log_density = torch.cat(log_density, dim=0)
